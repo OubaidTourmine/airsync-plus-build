@@ -1,0 +1,86 @@
+
+name: Build AirSync+ (Private)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 45
+
+    steps:
+      - name: Check compiler
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Clone official AirSync source
+        run: |
+          git clone --depth 1 https://github.com/sameerasw/airsync-mac.git source
+          git -C source rev-parse HEAD
+
+      - name: Prepare self-compiled configuration
+        run: |
+          mkdir -p source/airsync-mac/Configs
+          touch source/airsync-mac/Configs/Shared.xcconfig
+
+          cat > source/airsync-mac/Configs/SelfCompiled.xcconfig <<'EOF'
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) SELF_COMPILED
+          EOF
+
+      - name: Confirm Self Compiled scheme
+        working-directory: source
+        run: xcodebuild -list -project AirSync.xcodeproj
+
+      - name: Build AirSync+ for Apple Silicon
+        working-directory: source
+        shell: bash
+        run: |
+          set -o pipefail
+
+          xcodebuild \
+            -project AirSync.xcodeproj \
+            -scheme "AirSync Self Compiled" \
+            -configuration "Self Compiled" \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/AirSyncBuild" \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee "$RUNNER_TEMP/AirSync-build.log"
+
+      - name: Package compiled application
+        shell: bash
+        run: |
+          APP="$RUNNER_TEMP/AirSyncBuild/Build/Products/Self Compiled/AirSync.app"
+
+          if [ ! -d "$APP" ]; then
+            echo "AirSync.app not found at expected build path"
+            find "$RUNNER_TEMP/AirSyncBuild/Build/Products" \
+              -maxdepth 3 -name 'AirSync.app' -print
+            exit 1
+          fi
+
+          ditto -c -k --keepParent \
+            "$APP" \
+            "$GITHUB_WORKSPACE/AirSync-Plus.zip"
+
+      - name: Upload application
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSync-Plus
+          path: AirSync-Plus.zip
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSync-build-log
+          path: ${{ runner.temp }}/AirSync-build.log
+          retention-days: 3
+          if-no-files-found: ignore

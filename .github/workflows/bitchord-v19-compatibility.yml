@@ -31,6 +31,60 @@ jobs:
           p.write_text(s)
           PY
           echo "Desktop module restored; compiling against v1.9 shared dependencies."
+      - name: Adapt desktop interfaces for v1.9
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("desktopApp/src/main/kotlin/com/music/bitchord/desktop")
+
+          def apply(file, changes):
+              p = root / file
+              s = p.read_text()
+              for before, after in changes:
+                  if s.count(before) != 1:
+                      raise RuntimeError(f"{file}: expected one occurrence of {before[:80]!r}, found {s.count(before)}")
+                  s = s.replace(before, after, 1)
+              p.write_text(s)
+              print(f"patched {file}")
+
+          apply("DesktopApp.kt", [
+              (
+                  "                                when (entity.entityType) {",
+                  "                                when (entity.entityType) {\n                                    EntityType.OTHER -> Unit // v1.9 can store podcast pages; desktop navigation pending",
+              ),
+          ])
+
+          apply("DesktopSharedPages.kt", [
+              ("override val homeRecentsViewType:", "val homeRecentsViewType:"),
+              ("override fun setHomeRecentsViewType(", "fun setHomeRecentsViewType("),
+          ])
+
+          apply("DesktopPlayerHost.kt", [
+              (
+                  "import com.music.bitchord.data.settings.MixBlend",
+                  "import com.music.bitchord.data.settings.MixBlend\nimport com.music.bitchord.data.settings.MixTransitionView",
+              ),
+              (
+                  "    override val hideSongStatus = MutableStateFlow(false)",
+                  "    override val hideSongStatus = MutableStateFlow(false)\n    override val showQueueHistory = MutableStateFlow(false)\n    override val hideStatusBar = MutableStateFlow(false)\n    override val showListenTogetherButton = MutableStateFlow(true)",
+              ),
+              (
+                  "    override val meteredConnection = MutableStateFlow<Boolean?>(false)",
+                  "    override val meteredConnection = MutableStateFlow<Boolean?>(false)\n    override val streamCeilingOverride = MutableStateFlow<AudioQuality?>(null)",
+              ),
+              (
+                  "    override val smartAnalysis = MutableStateFlow(SmartAnalysis())",
+                  "    override val smartAnalysis = MutableStateFlow(SmartAnalysis())\n    override val automixDetail = MutableStateFlow<String?>(null)\n    override val smartMixView = MutableStateFlow<MixTransitionView?>(null)\n    override val smartMixProgress = MutableStateFlow(0f)",
+              ),
+              (
+                  '        carriesHiRes = outputIsFloat == true || (outputBytesPerSample ?: 2) > 2 ||\n            (outputSampleRateHz ?: 0) > 48_000,',
+                  '        bitPerfect = false, // This engine cannot verify exclusive bit-perfect output\n        dacLimited = false,',
+              ),
+          ])
+          PY
       - name: Configure Java 21
         uses: actions/setup-java@v4
         with:

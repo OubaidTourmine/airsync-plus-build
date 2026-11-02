@@ -1,0 +1,119 @@
+name: Build BitChord v1.0.4 (sandboxed macOS)
+
+on:
+  push:
+    branches:
+      - build-bitchord-104
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 100
+    concurrency:
+      group: bit-chord-v104
+      cancel-in-progress: false
+    env:
+      CARGO_BUILD_JOBS: "2"
+
+    steps:
+      - name: Check runner
+        shell: bash
+        run: |
+          xcodebuild -version
+          sw_vers
+          uname -m
+          df -h .
+
+      - name: Checkout fixed BitChord v1.0.4 source
+        uses: actions/checkout@v4
+        with:
+          repository: bagumamartin/BitChord
+          ref: v1.0.4
+          persist-credentials: false
+
+      - name: Install compilers and build utilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install xcodegen cmake openjdk@21 create-dmg
+          echo "JAVA_HOME=$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home" >> "$GITHUB_ENV"
+          echo "$(brew --prefix openjdk@21)/bin" >> "$GITHUB_PATH"
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare sandboxed Mac-only source
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$(brew --prefix openjdk@21)/bin:$HOME/.cargo/bin:$PATH"
+          java -version
+          cargo -V
+          rustup target add aarch64-apple-darwin
+          sed -i '' 's/com.apple.security.app-sandbox: false/com.apple.security.app-sandbox: true/' AppleApp/project.yml
+          sed -i '' 's/SUEnableAutomaticChecks: true/SUEnableAutomaticChecks: false/' AppleApp/project.yml
+          sed -i '' '/iosArm64(),/d; /iosSimulatorArm64(),/d' shared/build.gradle.kts
+          sed -i '' 's/-Xmx4g -XX:MaxMetaspaceSize=1g/-Xmx2300m -XX:MaxMetaspaceSize=768m/' gradle.properties
+          grep 'com.apple.security.app-sandbox' AppleApp/project.yml
+
+      - name: Build Kotlin shared framework (macOS only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG=release ./scripts/build-shared-framework.sh
+          df -h .
+
+      - name: Build Rust audio engine (macOS only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          NATIVE_TARGETS=aarch64-apple-darwin ./scripts/build-native-core.sh
+          df -h .
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec AppleApp/project.yml
+
+      - name: Build Mac app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project AppleApp/BitChord.xcodeproj \
+            -scheme BitChord \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/BitChordBuild" \
+            -jobs 2 \
+            build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            2>&1 | tee "$RUNNER_TEMP/BitChord-build.log"
+
+      - name: Create ad-hoc signed DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/mac-export
+          ditto "$RUNNER_TEMP/BitChordBuild/Build/Products/Release/BitChord.app" build/mac-export/BitChord.app
+          ./scripts/package-mac-dmg.sh 1.0.4 "$PWD/build/mac-export" --output-dir "$PWD/build"
+          test -f build/BitChord-1.0.4-build13-mac-arm64.dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: BitChord-1.0.4-sandboxed-mac-arm64
+          path: build/BitChord-1.0.4-build13-mac-arm64.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload Xcode build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BitChord-build-log
+          path: ${{ runner.temp }}/BitChord-build.log
+          retention-days: 3
+          if-no-files-found: ignore

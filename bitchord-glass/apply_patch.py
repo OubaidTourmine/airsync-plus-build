@@ -52,7 +52,7 @@ patch("DesktopStatusNotifier.kt", [
 patch("DesktopApp.kt", [
     (
         '''    LaunchedEffect(tray) {
-        if (!DesktopPlatform.isMac) DesktopTrayMenu.bind(''',
+        DesktopTrayMenu.bind(''',
         '''    LaunchedEffect(tray) {
         if (DesktopPlatform.isMac) DesktopMacGlass.bind(
             play = ::playFromUser,
@@ -80,7 +80,7 @@ patch("DesktopApp.kt", [
                 }
             },
         )
-        DesktopTrayMenu.bind(''',
+        if (!DesktopPlatform.isMac) DesktopTrayMenu.bind(''',
     ),
     (
         '''    LaunchedEffect(tray, trayIconEnabled) {
@@ -99,7 +99,7 @@ patch("DesktopApp.kt", [
     (
         '''    LaunchedEffect(selectedSong, playback.isPlaying) {
         val title = selectedSong?.let''',
-        '''    // Keep the native SwiftUI player and macOS Control Center synchronized.
+        '''    // Keep native macOS Now Playing synchronized without any tray UI.
     // Position is sampled from the original engine; no separate playback engine is created.
     LaunchedEffect(playback.song?.videoId, playback.isPlaying, playback.durationMs, playback.positionMs) {
         if (DesktopPlatform.isMac) DesktopMacGlass.publish(playback)

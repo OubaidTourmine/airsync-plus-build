@@ -1,0 +1,85 @@
+name: BitChord Glass + macOS Now Playing (single build)
+on:
+  push:
+    branches: [bitchord-glass-nowplaying]
+    paths:
+      - '.github/workflows/build-bitchord-glass.yml'
+      - 'bitchord-glass/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - name: Checkout our integration and native bridge
+        uses: actions/checkout@v4
+        with:
+          path: integration
+      - name: Checkout proven Google-login and playback revision
+        uses: actions/checkout@v4
+        with:
+          repository: kushagrasinghx/BitChord
+          ref: 41198be97245cc3e7e3c0540da55435f3f02a9ea
+          path: source
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build SwiftUI glass tray + MediaPlayer framework
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/desktopApp/src/main/resources/native
+          swiftc -swift-version 5 -O -parse-as-library -emit-library \
+            -module-name BitChordGlass \
+            -framework AppKit -framework SwiftUI -framework MediaPlayer \
+            integration/bitchord-glass/BitChordGlass.swift \
+            -o source/desktopApp/src/main/resources/native/libBitChordGlass.dylib
+          file source/desktopApp/src/main/resources/native/libBitChordGlass.dylib
+      - name: Apply macOS-only changes (original audio and auth unchanged)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp integration/bitchord-glass/DesktopMacGlass.kt \
+            source/desktopApp/src/main/kotlin/com/music/bitchord/desktop/DesktopMacGlass.kt
+          cd source
+          python3 ../integration/bitchord-glass/apply_patch.py
+      - name: Compile app and package DMG
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :desktopApp:packageDmg -Pbitchord.version=1.8.1-glass.1 --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/bitchord-build.log"
+          find desktopApp/build/compose/binaries/main/dmg -maxdepth 1 -type f -print
+      - name: Verify packaged Swift bridge is included in app JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          jarfile=$(find source/desktopApp/build/compose/binaries/main/app source/desktopApp/build/compose/binaries/main/dmg -name 'desktopApp*.jar' -print -quit 2>/dev/null || true)
+          if [ -z "$jarfile" ]; then
+            ./source/gradlew -p source :desktopApp:createDistributable -Pbitchord.version=1.8.1-glass.1 --no-daemon
+            jarfile=$(find source/desktopApp/build/compose/binaries/main/app -name 'desktopApp*.jar' -print -quit)
+          fi
+          test -n "$jarfile"
+          jar tf "$jarfile" | grep -F 'native/libBitChordGlass.dylib'
+          echo "Bridge packaged in $jarfile"
+      - name: Upload combined Glass + Now Playing macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BitChord-Glass-NowPlaying-GoogleLogin-macOS-arm64
+          path: source/desktopApp/build/compose/binaries/main/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload diagnostic build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glass-NowPlaying-build-errors
+          path: ${{ runner.temp }}/bitchord-build.log
+          if-no-files-found: ignore

@@ -46,11 +46,14 @@ private final class BitChordGlassBridge: NSObject, ObservableObject {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            let appIcon = NSApplication.shared.applicationIconImage
-            let icon = (appIcon.copy() as? NSImage) ?? appIcon
-            icon.size = NSSize(width: 19, height: 19)
-            icon.isTemplate = false
-            button.image = icon
+            if let appIcon = NSApplication.shared.applicationIconImage {
+                let icon = (appIcon.copy() as? NSImage) ?? appIcon
+                icon.size = NSSize(width: 19, height: 19)
+                icon.isTemplate = false
+                button.image = icon
+            } else {
+                button.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "BitChord")
+            }
             button.imagePosition = .imageOnly
             button.toolTip = "BitChord · Mini Player"
             button.target = self

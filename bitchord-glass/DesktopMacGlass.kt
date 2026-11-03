@@ -82,7 +82,23 @@ internal object DesktopMacGlass {
             .onFailure { DesktopTrackLog.log("macOS MediaPlayer setup failed: ${it.message}") }
     }
 
+    private var lastTrackId: String? = null
+    private var lastPlaying = false
+    private var lastDurationMs = -1L
+    private var lastPublishNanos = 0L
+
     fun publish(state: DesktopPlaybackState) {
+        // The media center interpolates progress from playbackRate itself. Avoid
+        // rebuilding the artwork/metadata dictionary on every audio-position tick.
+        val id = state.song?.videoId
+        val now = System.nanoTime()
+        val unchanged = id == lastTrackId &&
+            state.isPlaying == lastPlaying && state.durationMs == lastDurationMs
+        if (unchanged && now - lastPublishNanos in 0 until 1_000_000_000L) return
+        lastTrackId = id
+        lastPlaying = state.isPlaying
+        lastDurationMs = state.durationMs
+        lastPublishNanos = now
         val song = state.song
         runCatching {
             api?.bc_update(

@@ -1,7 +1,7 @@
-name: BitChord Glass + macOS Now Playing (single build)
+name: BitChord Lean + native macOS Now Playing (no menu bar)
 on:
   push:
-    branches: [bitchord-glass-nowplaying]
+    branches: [bitchord-lean-nowplaying]
     paths:
       - '.github/workflows/build-bitchord-glass.yml'
       - 'bitchord-glass/**'
@@ -30,14 +30,14 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
-      - name: Build SwiftUI glass tray + MediaPlayer framework
+      - name: Build lightweight native macOS MediaPlayer bridge
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p source/desktopApp/src/main/resources/native
           swiftc -swift-version 5 -O -parse-as-library -emit-library \
             -module-name BitChordGlass \
-            -framework AppKit -framework SwiftUI -framework MediaPlayer \
+            -framework AppKit -framework MediaPlayer \
             integration/bitchord-glass/BitChordGlass.swift \
             -o source/desktopApp/src/main/resources/native/libBitChordGlass.dylib
           file source/desktopApp/src/main/resources/native/libBitChordGlass.dylib
@@ -55,9 +55,9 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :desktopApp:packageDmg -Pbitchord.version=1.8.1-glass.1 --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/bitchord-build.log"
+          ./gradlew :desktopApp:packageDmg -Pbitchord.version=1.8.1-lean.1 --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/bitchord-build.log"
           find desktopApp/build/compose/binaries/main/dmg -maxdepth 1 -type f -print
-      - name: Verify packaged Swift bridge is included in app JAR
+      - name: Verify native Now Playing bridge is in app JAR
         shell: bash
         run: |
           set -euo pipefail
@@ -69,10 +69,10 @@ jobs:
           test -n "$jarfile"
           jar tf "$jarfile" | grep -F 'native/libBitChordGlass.dylib'
           echo "Bridge packaged in $jarfile"
-      - name: Upload combined Glass + Now Playing macOS installer
+      - name: Upload low-memory BitChord with system Now Playing
         uses: actions/upload-artifact@v4
         with:
-          name: BitChord-Glass-NowPlaying-GoogleLogin-macOS-arm64
+          name: BitChord-Lean-NowPlaying-NoMenuBar-macOS-arm64
           path: source/desktopApp/build/compose/binaries/main/dmg/*.dmg
           if-no-files-found: error
           retention-days: 7
@@ -80,6 +80,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Glass-NowPlaying-build-errors
+          name: Lean-NowPlaying-build-errors
           path: ${{ runner.temp }}/bitchord-build.log
           if-no-files-found: ignore

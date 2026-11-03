@@ -9,7 +9,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 /**
- * A single native macOS menu-bar status item and the system's Now Playing session.
+ * Native macOS Now Playing session only. No tray or menu-bar item.
  *
  * Intentionally owns NO playback engine or Google state: it mirrors the already-working
  * DesktopPlaybackEngine and forwards commands to the existing application callbacks.
@@ -21,7 +21,6 @@ internal object DesktopMacGlass {
 
     private interface Api : Library {
         fun bc_start(callback: CommandCallback)
-        fun bc_show_tray(visible: Int)
         fun bc_update(title: String, artist: String, artwork: String, duration: Double, elapsed: Double, playing: Int)
         fun bc_stop()
     }
@@ -81,11 +80,6 @@ internal object DesktopMacGlass {
         onSeek = seek
         runCatching { api?.bc_start(callback) }
             .onFailure { DesktopTrackLog.log("macOS MediaPlayer setup failed: ${it.message}") }
-    }
-
-    fun showTray(visible: Boolean) {
-        runCatching { api?.bc_show_tray(if (visible) 1 else 0) }
-            .onFailure { DesktopTrackLog.log("macOS tray failed: ${it.message}") }
     }
 
     fun publish(state: DesktopPlaybackState) {

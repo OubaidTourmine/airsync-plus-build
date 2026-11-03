@@ -5,7 +5,7 @@ import MediaPlayer
 import SwiftUI
 
 // Native bridge hosted inside the existing JVM process, not a second app.
-private typealias CommandCallback = @convention(c) (Int32, Double) -> Void
+public typealias CommandCallback = @convention(c) (Int32, Double) -> Void
 
 @MainActor
 private final class BitChordGlassBridge: NSObject, ObservableObject {

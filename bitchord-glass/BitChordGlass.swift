@@ -19,6 +19,7 @@ private final class BitChordGlassBridge: NSObject {
 
     var callback: CommandCallback?
     private var currentArtworkURL = ""
+    private var pendingArtwork: URLSessionDataTask?
     private var initialized = false
 
     func start(_ handler: CommandCallback?) {
@@ -29,6 +30,10 @@ private final class BitChordGlassBridge: NSObject {
     }
 
     func stop() {
+        pendingArtwork?.cancel()
+        pendingArtwork = nil
+        artwork = nil
+        currentArtworkURL = ""
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         MPNowPlayingInfoCenter.default().playbackState = .stopped
         callback = nil
@@ -46,18 +51,22 @@ private final class BitChordGlassBridge: NSObject {
         elapsed = max(0, min(newElapsed, max(0, newDuration)))
         isPlaying = playing
         if currentArtworkURL != artworkURL {
+            pendingArtwork?.cancel()
+            pendingArtwork = nil
             currentArtworkURL = artworkURL
             artwork = nil
             if let url = URL(string: artworkURL), url.scheme == "https" {
                 let identity = artworkURL
-                URLSession.shared.dataTask(with: url) { data, _, _ in
+                let task = URLSession.shared.dataTask(with: url) { data, _, _ in
                     guard let data, let image = NSImage(data: data) else { return }
                     DispatchQueue.main.async {
                         guard self.currentArtworkURL == identity else { return }
                         self.artwork = image
                         self.publishNowPlaying()
                     }
-                }.resume()
+                }
+                pendingArtwork = task
+                task.resume()
             }
         }
         publishNowPlaying()

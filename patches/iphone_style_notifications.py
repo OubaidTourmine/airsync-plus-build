@@ -49,6 +49,7 @@ extension = r'''
 //
 // These desktop banners are not native Notification Center entries because
 // macOS provides no supported way to remove/reposition the sender app icon.
+@MainActor
 private final class AirSyncMirrorBannerPresenter {
     static let shared = AirSyncMirrorBannerPresenter()
 

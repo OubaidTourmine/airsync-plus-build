@@ -23,6 +23,10 @@ jobs:
           git clone --depth 1 https://github.com/sameerasw/airsync-mac.git source
           git -C source rev-parse HEAD
 
+      - name: Apply iPhone-style Android notification patch
+        run: |
+          python3 patches/iphone_style_notifications.py source/airsync-mac/Core/AppState.swift
+
       - name: Prepare self-compiled configuration
         run: |
           mkdir -p source/airsync-mac/Configs

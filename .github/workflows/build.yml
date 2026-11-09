@@ -3,6 +3,10 @@ name: Build AirSync+ (Private)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build.yml'
 
 permissions:
   contents: read
@@ -31,6 +35,33 @@ jobs:
           cat > source/airsync-mac/Configs/SelfCompiled.xcconfig <<'EOF'
           SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) SELF_COMPILED
           EOF
+
+      - name: Fix manual clipboard sending from menu bar
+        working-directory: source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("airsync-mac/Screens/MenubarView/MenubarSegments.swift")
+          source = path.read_text(encoding="utf-8")
+          start = source.index("    private func sendClipboard() {")
+          end = source.index("    private func openQuickShare()", start)
+          handler = source[start:end]
+
+          old = "        }\n    }\n"
+          new = (
+              "        } else if let text = pasteboard.string(forType: .string), !text.isEmpty {\n"
+              "            appState.sendClipboardToAndroid(text: text)\n"
+              "        }\n    }\n"
+          )
+          if handler.count(old) != 1 or "appState.sendClipboardToAndroid(text: text)" in handler:
+              raise SystemExit("Upstream menu-bar clipboard handler changed; refusing unsafe patch")
+
+          patched = source[:start] + handler.replace(old, new, 1) + source[end:]
+          path.write_text(patched, encoding="utf-8")
+          print("Manual menu-bar text clipboard send enabled. Empty clipboard is a no-op.")
+          PY
 
       - name: Confirm Self Compiled scheme
         working-directory: source

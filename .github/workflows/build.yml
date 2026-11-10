@@ -24,8 +24,11 @@ jobs:
 
       - name: Clone official AirSync source
         run: |
-          git clone --depth 1 https://github.com/sameerasw/airsync-mac.git source
-          git -C source rev-parse HEAD
+          git init source
+          git -C source remote add origin https://github.com/sameerasw/airsync-mac.git
+          git -C source fetch --depth 1 origin 767bdeb2f6c043de04af0924ccec2ecd889d572f
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "767bdeb2f6c043de04af0924ccec2ecd889d572f"
 
       - name: Prepare self-compiled configuration
         run: |
@@ -61,6 +64,26 @@ jobs:
           patched = source[:start] + handler.replace(old, new, 1) + source[end:]
           path.write_text(patched, encoding="utf-8")
           print("Manual menu-bar text clipboard send enabled. Empty clipboard is a no-op.")
+          PY
+
+      - name: Hide duplicate notifications from AirSync menu bar
+        working-directory: source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("airsync-mac/Screens/MenubarView/MenubarView.swift")
+          source = path.read_text(encoding="utf-8")
+          old = (
+              "            NotificationsSegmentView()\n"
+              "                .staggeredEntrance(index: 4, isVisible: appState.isMenubarWindowOpen)\n"
+          )
+          if source.count(old) != 1:
+              raise SystemExit("Upstream menu-bar layout changed; refusing unsafe patch")
+
+          path.write_text(source.replace(old, "", 1), encoding="utf-8")
+          print("AirSync menu-bar notification cards hidden; native notification delivery unchanged.")
           PY
 
       - name: Confirm Self Compiled scheme

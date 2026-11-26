@@ -118,6 +118,9 @@ jobs:
             exit 1
           fi
 
+          # Xcode strips development headers when embedding Sparkle, invalidating its resource seal.
+          codesign --force --sign - "$APP/Contents/Frameworks/Sparkle.framework"
+
           for extension in "$APP"/Contents/PlugIns/*.appex; do
             case "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension/Contents/Info.plist")" in
               sameerasw.airsync-mac.share) entitlements=AirSyncShareExtension.entitlements ;;

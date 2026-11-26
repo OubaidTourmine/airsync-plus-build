@@ -118,6 +118,26 @@ jobs:
             exit 1
           fi
 
+          for extension in "$APP"/Contents/PlugIns/*.appex; do
+            case "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension/Contents/Info.plist")" in
+              sameerasw.airsync-mac.share) entitlements=AirSyncShareExtension.entitlements ;;
+              sameerasw.airsync-mac.widget) entitlements=AirSyncWidgetExtension.entitlements ;;
+              *) echo "Unexpected app extension: $extension"; exit 1 ;;
+            esac
+            codesign --force --sign - --entitlements "source/$entitlements" "$extension"
+          done
+          codesign --force --sign - --entitlements source/AirSync.entitlements "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          lipo -verify_arch arm64 "$APP/Contents/MacOS/AirSync"
+
+          STAGING="$RUNNER_TEMP/AirSync-DMG"
+          mkdir -p "$STAGING"
+          ditto "$APP" "$STAGING/AirSync.app"
+          ln -s /Applications "$STAGING/Applications"
+          DMG="$GITHUB_WORKSPACE/AirSync-Plus-4.2.0-arm64.dmg"
+          hdiutil create -volname 'AirSync+' -srcfolder "$STAGING" -format UDZO "$DMG"
+          hdiutil verify "$DMG"
+
           ditto -c -k --keepParent \
             "$APP" \
             "$GITHUB_WORKSPACE/AirSync-Plus.zip"
@@ -128,6 +148,14 @@ jobs:
           name: AirSync-Plus
           path: AirSync-Plus.zip
           retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSync-Plus-4.2.0-arm64
+          path: AirSync-Plus-4.2.0-arm64.dmg
+          retention-days: 30
           if-no-files-found: error
 
       - name: Upload build log if failed

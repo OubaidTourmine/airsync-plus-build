@@ -91,7 +91,7 @@ jobs:
           print("AirSync menu-bar notification cards hidden; native notification delivery unchanged.")
           PY
 
-      - name: Rounded-square notification icon (26 pt, raised)
+      - name: Rounded-square notification icon (22 pt, raised)
         working-directory: source
         shell: bash
         run: |
@@ -110,9 +110,9 @@ jobs:
 
           new = r'''    private func saveIconToTemporaryFile(icon: NSImage) -> URL? {
                   // TUNING: change these three values to adjust the look.
-                  let iconSide: CGFloat = 26      // 26 pt of the 32 pt thumbnail
+                  let iconSide: CGFloat = 22      // 22 pt of the 32 pt thumbnail
                   let canvasSide: CGFloat = 32    // transparent canvas the system places
-                  let yOffset: CGFloat = 3        // largest upward shift without clipping at 26 pt
+                  let yOffset: CGFloat = 5        // raise without clipping the 22 pt artwork
                   let scale: CGFloat = 3
 
                   let px = Int(canvasSide * scale)
@@ -162,26 +162,6 @@ jobs:
               }
           '''
           path.write_text(source[:start] + new + source[end:], encoding="utf-8")
-          marker = "        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)"
-          site = "    private func finalizeAndSchedule("
-          patched = path.read_text(encoding="utf-8")
-          a = patched.index(site)
-          b = patched.index(marker, a)
-          icon_override = """\
-                  // Prefer the bundled blue artwork for the native sender icon.
-                  if let url = Bundle.main.url(forResource: "BlueAirSync", withExtension: "icns"),
-                     let iconClass = NSClassFromString("UNNotificationIcon"),
-                     let iconType = iconClass as? NSObject.Type {
-                      let makeIcon = NSSelectorFromString("iconAtPath:")
-                      let setIcon = NSSelectorFromString("setIcon:")
-                      if iconType.responds(to: makeIcon), content.responds(to: setIcon),
-                         let senderIcon = iconType.perform(makeIcon, with: url.path)?.takeUnretainedValue() {
-                          _ = content.perform(setIcon, with: senderIcon)
-                      }
-                  }
-          """
-          path.write_text(patched[:b] + icon_override + patched[b:], encoding="utf-8")
-          print("Notification artwork uses a raised 26 pt square and requests the blue sender icon.")
           PY
 
       - name: Restore the original blue app icon in the asset catalog
@@ -191,6 +171,50 @@ jobs:
           git restore --source FETCH_HEAD -- AppIcon.icon
           git diff --quiet -- AppIcon.icon && exit 1
           test -f AppIcon.icon/icon.json
+
+      - name: Set a fresh sender identity and migrate AirSync preferences
+        working-directory: source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          project = Path("AirSync.xcodeproj/project.pbxproj")
+          old = "sameerasw.airsync-mac"
+          new = "com.oubaidtourmine.airsync.blue"
+          source = project.read_text()
+          source, count = re.subn(
+              r'(PRODUCT_BUNDLE_IDENTIFIER = ")sameerasw\.airsync-mac(?="|\.share"|\.widget")',
+              lambda m: m[1] + new, source
+          )
+          if count != 9:
+              raise SystemExit(f"Expected nine app and extension identities, found {count}")
+          project.write_text(source)
+
+          app = Path("airsync-mac/airsync_macApp.swift")
+          source = app.read_text()
+          marker = "@main\nstruct airsync_macApp: App"
+          if source.count(marker) != 1:
+              raise SystemExit("AirSync entry point changed")
+          entry = '''@main
+          enum AirSyncEntry {
+              static func main() {
+                  let defaults = UserDefaults.standard
+                  let migrated = "didMigrateBlueAirSyncPreferences"
+                  if !defaults.bool(forKey: migrated) {
+                      let previous = defaults.persistentDomain(forName: "sameerasw.airsync-mac") ?? [:]
+                      for (key, value) in previous where defaults.object(forKey: key) == nil {
+                          defaults.set(value, forKey: key)
+                      }
+                      defaults.set(true, forKey: migrated)
+                  }
+                  airsync_macApp.main()
+              }
+          }
+
+          struct airsync_macApp: App'''
+          app.write_text(source.replace(marker, entry, 1))
+          PY
 
       - name: Confirm Self Compiled scheme
         working-directory: source
@@ -225,8 +249,7 @@ jobs:
           fi
 
           cp assets/BlueAirSync.icns "$APP/Contents/Resources/AppIcon.icns"
-          cp assets/BlueAirSync.icns "$APP/Contents/Resources/BlueAirSync.icns"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 35' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 36' "$APP/Contents/Info.plist"
 
           # Xcode strips development files when embedding frameworks, invalidating their resource seals.
           for framework in "$APP"/Contents/Frameworks/*.framework; do
@@ -235,8 +258,8 @@ jobs:
 
           for extension in "$APP"/Contents/PlugIns/*.appex; do
             case "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension/Contents/Info.plist")" in
-              sameerasw.airsync-mac.share) entitlements=AirSyncShareExtension.entitlements ;;
-              sameerasw.airsync-mac.widget) entitlements=AirSyncWidgetExtension.entitlements ;;
+              com.oubaidtourmine.airsync.blue.share) entitlements=AirSyncShareExtension.entitlements ;;
+              com.oubaidtourmine.airsync.blue.widget) entitlements=AirSyncWidgetExtension.entitlements ;;
               *) echo "Unexpected app extension: $extension"; exit 1 ;;
             esac
             codesign --force --sign - --entitlements "source/$entitlements" "$extension"

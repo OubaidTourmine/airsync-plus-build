@@ -4,7 +4,7 @@ name: Build AirSync+ (Private)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, fix/notification-icon-layout]
     paths:
       - '.github/workflows/build.yml'
 
@@ -86,6 +86,67 @@ jobs:
           print("AirSync menu-bar notification cards hidden; native notification delivery unchanged.")
           PY
 
+      - name: Center the visible Android notification icon
+        working-directory: source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("airsync-mac/Core/AppState.swift")
+          source = path.read_text(encoding="utf-8")
+          original = """\
+                  // Save NSImage as a temporary PNG file to attach in notification
+                  guard let tiffData = icon.tiffRepresentation,
+                        let bitmap = NSBitmapImageRep(data: tiffData),
+                        let pngData = bitmap.representation(using: .png, properties: [:]) else {
+                      return nil
+                  }
+          """
+          aligned = """\
+                  let canvasSize = CGSize(width: 256, height: 256)
+                  let artworkBounds = CGRect(x: 56, y: 112, width: 144, height: 144)
+                  let imageSize = icon.size
+                  guard imageSize.width > 0, imageSize.height > 0 else { return nil }
+
+                  let scale = min(
+                      artworkBounds.width / imageSize.width,
+                      artworkBounds.height / imageSize.height
+                  )
+                  let width = imageSize.width * scale
+                  let height = imageSize.height * scale
+                  let artworkRect = CGRect(
+                      x: artworkBounds.midX - width / 2,
+                      y: artworkBounds.midY - height / 2,
+                      width: width,
+                      height: height
+                  )
+
+                  // Notification Center draws the attachment lower than the sender icon.
+                  // Fit its artwork near the top of a transparent square to align the visible icons.
+                  let thumbnail = NSImage(size: canvasSize, flipped: false) { _ in
+                      icon.draw(
+                          in: artworkRect,
+                          from: .zero,
+                          operation: .sourceOver,
+                          fraction: 1,
+                          respectFlipped: true,
+                          hints: [.interpolation: NSImageInterpolation.high]
+                      )
+                      return true
+                  }
+
+                  guard let tiffData = thumbnail.tiffRepresentation,
+                        let bitmap = NSBitmapImageRep(data: tiffData),
+                        let pngData = bitmap.representation(using: .png, properties: [:]) else {
+                      return nil
+                  }
+          """
+          if source.count(original.rstrip("\n")) != 1:
+              raise SystemExit("Upstream notification icon code changed")
+          path.write_text(source.replace(original.rstrip("\n"), aligned.rstrip("\n"), 1), encoding="utf-8")
+          PY
+
       - name: Confirm Self Compiled scheme
         working-directory: source
         run: xcodebuild -list -project AirSync.xcodeproj
@@ -117,6 +178,22 @@ jobs:
               -maxdepth 3 -name 'AirSync.app' -print
             exit 1
           fi
+
+          cp assets/BlueAirSync.icns "$APP/Contents/Resources/BlueAirSync.icns"
+          python3 - "$APP/Contents/Info.plist" <<'PY'
+          import plistlib
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          info = plistlib.loads(path.read_bytes())
+          info["CFBundleIconFile"] = "BlueAirSync"
+          info.pop("CFBundleIconName", None)
+          primary = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
+          primary["CFBundleIconFiles"] = ["BlueAirSync"]
+          primary.pop("CFBundleIconName", None)
+          path.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY, sort_keys=False))
+          PY
 
           # Xcode strips development files when embedding frameworks, invalidating their resource seals.
           for framework in "$APP"/Contents/Frameworks/*.framework; do

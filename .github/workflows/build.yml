@@ -91,7 +91,7 @@ jobs:
           print("AirSync menu-bar notification cards hidden; native notification delivery unchanged.")
           PY
 
-      - name: Rounded square notification icon (32 pt, centered)
+      - name: Rounded-square notification icon (26 pt, raised)
         working-directory: source
         shell: bash
         run: |
@@ -110,9 +110,9 @@ jobs:
 
           new = r'''    private func saveIconToTemporaryFile(icon: NSImage) -> URL? {
                   // TUNING: change these three values to adjust the look.
-                  let iconSide: CGFloat = 32      // visible icon size in pt
+                  let iconSide: CGFloat = 26      // 26 pt of the 32 pt thumbnail
                   let canvasSide: CGFloat = 32    // transparent canvas the system places
-                  let yOffset: CGFloat = 0        // full-size artwork uses the entire thumbnail
+                  let yOffset: CGFloat = 3        // largest upward shift without clipping at 26 pt
                   let scale: CGFloat = 3
 
                   let px = Int(canvasSide * scale)
@@ -181,7 +181,7 @@ jobs:
                   }
           """
           path.write_text(patched[:b] + icon_override + patched[b:], encoding="utf-8")
-          print("Notification artwork uses the full thumbnail and requests the blue sender icon.")
+          print("Notification artwork uses a raised 26 pt square and requests the blue sender icon.")
           PY
 
       - name: Restore the original blue app icon in the asset catalog
@@ -224,8 +224,9 @@ jobs:
             exit 1
           fi
 
+          cp assets/BlueAirSync.icns "$APP/Contents/Resources/AppIcon.icns"
           cp assets/BlueAirSync.icns "$APP/Contents/Resources/BlueAirSync.icns"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 34' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 35' "$APP/Contents/Info.plist"
 
           # Xcode strips development files when embedding frameworks, invalidating their resource seals.
           for framework in "$APP"/Contents/Frameworks/*.framework; do

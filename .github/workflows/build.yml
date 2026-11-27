@@ -17,6 +17,11 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      - name: Check out AirSync build assets
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Check compiler
         run: |
           xcodebuild -version

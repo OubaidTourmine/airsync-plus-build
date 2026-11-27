@@ -1,0 +1,90 @@
+name: Blue native sender test
+on:
+  push:
+    branches: [fix/notification-icon-layout]
+    paths: [.github/workflows/blue-sender-test.yml]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build the blue sender test
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="AirSync Blue Test.app"
+          mkdir -p "$app/Contents/"{MacOS,Resources}
+          cp assets/BlueAirSync.icns "$app/Contents/Resources/AppIcon.icns"
+          cat > "$app/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>com.oubaidtourmine.airsync.blue-sender-test</string>
+          <key>CFBundleName</key><string>AirSync Blue Test</string>
+          <key>CFBundleExecutable</key><string>BlueSender</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleIconFile</key><string>AppIcon</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          </dict></plist>
+          PLIST
+          cat > Probe.swift <<'SWIFT'
+          import AppKit
+          import UserNotifications
+
+          final class Probe: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+              func applicationDidFinishLaunching(_ notification: Notification) {
+                  let center = UNUserNotificationCenter.current()
+                  center.delegate = self
+                  center.requestAuthorization(options: [.alert]) { allowed, error in
+                      guard allowed else {
+                          DispatchQueue.main.async {
+                              self.finish(error?.localizedDescription ?? "Enable notifications for AirSync Blue Test in System Settings, then open it again.")
+                          }
+                          return
+                      }
+                      let content = UNMutableNotificationContent()
+                      content.title = "AirSync blue icon test"
+                      content.body = "Check the sender icon on the left."
+                      center.add(UNNotificationRequest(identifier: "blue-sender-test", content: content, trigger: nil)) { error in
+                          DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                              if let error { self.finish(error.localizedDescription) }
+                              else { NSApp.terminate(nil) }
+                          }
+                      }
+                  }
+              }
+
+              func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                          withCompletionHandler completion: @escaping (UNNotificationPresentationOptions) -> Void) {
+                  completion([.banner, .list])
+              }
+
+              private func finish(_ message: String) {
+                  let alert = NSAlert()
+                  alert.messageText = message
+                  alert.runModal()
+                  NSApp.terminate(nil)
+              }
+          }
+
+          let app = NSApplication.shared
+          let probe = Probe()
+          app.delegate = probe
+          app.setActivationPolicy(.accessory)
+          app.run()
+          SWIFT
+          xcrun swiftc -target arm64-apple-macos14.5 Probe.swift -o "$app/Contents/MacOS/BlueSender"
+          plutil -lint "$app/Contents/Info.plist"
+          codesign --force --sign - "$app"
+          codesign --verify --strict "$app"
+          ditto -c -k --keepParent "$app" AirSync-Blue-Test.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AirSync-Blue-Test
+          path: AirSync-Blue-Test.zip
+          if-no-files-found: error

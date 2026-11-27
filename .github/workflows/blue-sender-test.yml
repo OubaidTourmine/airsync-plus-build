@@ -1,4 +1,4 @@
-name: Native 32 pt alignment test
+name: Custom 32 pt banner preview
 on:
   push:
     branches: [fix/notification-icon-layout]
@@ -16,15 +16,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="AirSync Alignment Test.app"
+          app="AirSync Banner Preview.app"
           mkdir -p "$app/Contents/"{MacOS,Resources}
           cp assets/BlueAirSync.icns "$app/Contents/Resources/AppIcon.icns"
           cat > "$app/Contents/Info.plist" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
-          <key>CFBundleIdentifier</key><string>com.oubaidtourmine.airsync.alignment-test</string>
-          <key>CFBundleName</key><string>AirSync Alignment Test</string>
+          <key>CFBundleIdentifier</key><string>com.oubaidtourmine.airsync.banner-preview</string>
+          <key>CFBundleName</key><string>AirSync Banner Preview</string>
           <key>CFBundleExecutable</key><string>BlueSender</string>
           <key>CFBundlePackageType</key><string>APPL</string>
           <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -34,103 +34,86 @@ jobs:
           PLIST
           cat > Probe.swift <<'SWIFT'
           import AppKit
-          import UserNotifications
-          import ImageIO
 
-          final class Probe: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+          final class Preview: NSObject, NSApplicationDelegate {
+              private var panel: NSPanel?
+
               func applicationDidFinishLaunching(_ notification: Notification) {
-                  let center = UNUserNotificationCenter.current()
-                  center.delegate = self
-                  center.requestAuthorization(options: [.alert]) { allowed, error in
-                      guard allowed else {
-                          DispatchQueue.main.async {
-                              self.finish(error?.localizedDescription ?? "Enable notifications for AirSync Alignment Test in System Settings, then open it again.")
-                          }
-                          return
-                      }
-                      DispatchQueue.main.async {
-                          do {
-                              try self.post(center: center, hideDate: false)
-                              try self.post(center: center, hideDate: true)
-                          } catch {
-                              self.finish(error.localizedDescription)
-                          }
-                      }
+                  guard let screen = NSScreen.main else { NSApp.terminate(nil); return }
+                  let frame = screen.visibleFrame
+                  let width: CGFloat = 350
+                  let height: CGFloat = 76
+                  let panel = NSPanel(
+                      contentRect: NSRect(x: frame.maxX - width - 16, y: frame.maxY - height - 12,
+                                          width: width, height: height),
+                      styleMask: [.borderless, .nonactivatingPanel],
+                      backing: .buffered, defer: false
+                  )
+                  panel.isOpaque = false
+                  panel.backgroundColor = .clear
+                  panel.hasShadow = true
+                  panel.level = .floating
+                  panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+
+                  let glass = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+                  glass.material = .hudWindow
+                  glass.blendingMode = .behindWindow
+                  glass.state = .active
+                  glass.wantsLayer = true
+                  glass.layer?.cornerRadius = 20
+                  glass.layer?.masksToBounds = true
+                  glass.layer?.borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
+                  glass.layer?.borderWidth = 1
+
+                  let iconY = (height - 32) / 2
+                  let phone = NSImageView(frame: NSRect(x: 16, y: iconY, width: 32, height: 32))
+                  if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
+                      phone.image = NSImage(contentsOf: url)
                   }
-              }
+                  phone.imageScaling = .scaleProportionallyUpOrDown
+                  glass.addSubview(phone)
 
-              func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
-                                          withCompletionHandler completion: @escaping (UNNotificationPresentationOptions) -> Void) {
-                  completion([.banner, .list])
-              }
+                  let tile = NSView(frame: NSRect(x: width - 48, y: iconY, width: 32, height: 32))
+                  tile.wantsLayer = true
+                  tile.layer?.cornerRadius = 8
+                  tile.layer?.backgroundColor = NSColor(srgbRed: 0.36, green: 0.20, blue: 0.92, alpha: 1).cgColor
+                  let glyph = NSImageView(frame: NSRect(x: 7, y: 7, width: 18, height: 18))
+                  glyph.image = NSImage(systemSymbolName: "bell.fill", accessibilityDescription: "Test app icon")
+                  glyph.contentTintColor = .white
+                  tile.addSubview(glyph)
+                  glass.addSubview(tile)
 
-              private func post(center: UNUserNotificationCenter, hideDate: Bool) throws {
-                  let content = UNMutableNotificationContent()
-                  content.title = hideDate ? "B — Date flags on" : "A — Date flags off"
-                  content.body = "Compare the two icon centers."
-                  if hideDate {
-                      for name in ["shouldHideDate", "shouldHideTime"] {
-                          let setter = name == "shouldHideDate" ? "setShouldHideDate:" : "setShouldHideTime:"
-                          guard content.responds(to: NSSelectorFromString(setter)) else {
-                              throw NSError(domain: "AirSync Alignment Test", code: 1,
-                                            userInfo: [NSLocalizedDescriptionKey: "This macOS version is missing " + setter])
-                          }
-                          content.setValue(true, forKey: name)
-                      }
-                  }
+                  let title = NSTextField(labelWithString: "Notification Test")
+                  title.font = .systemFont(ofSize: 14, weight: .semibold)
+                  title.textColor = .white
+                  title.frame = NSRect(x: 60, y: 39, width: 232, height: 18)
+                  glass.addSubview(title)
+                  let body = NSTextField(labelWithString: "Both icons are centered at 32 pt.")
+                  body.font = .systemFont(ofSize: 13)
+                  body.textColor = NSColor.white.withAlphaComponent(0.85)
+                  body.frame = NSRect(x: 60, y: 20, width: 232, height: 18)
+                  glass.addSubview(body)
 
-                  let url = FileManager.default.temporaryDirectory
-                      .appendingPathComponent(UUID().uuidString + ".png")
-                  let size = 256
-                  guard let bitmap = CGContext(data: nil, width: size, height: size,
-                                               bitsPerComponent: 8, bytesPerRow: 0,
-                                               space: CGColorSpaceCreateDeviceRGB(),
-                                               bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-                        let output = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil)
-                  else { throw CocoaError(.fileWriteUnknown) }
-                  bitmap.setFillColor(red: 0.38, green: 0.22, blue: 0.91, alpha: 1)
-                  bitmap.addPath(CGPath(roundedRect: CGRect(x: 0, y: 0, width: 256, height: 256),
-                                        cornerWidth: 56, cornerHeight: 56, transform: nil))
-                  bitmap.fillPath()
-                  bitmap.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
-                  bitmap.fillEllipse(in: CGRect(x: 86, y: 86, width: 84, height: 84))
-                  guard let image = bitmap.makeImage() else { throw CocoaError(.fileWriteUnknown) }
-                  CGImageDestinationAddImage(output, image, nil)
-                  guard CGImageDestinationFinalize(output) else { throw CocoaError(.fileWriteUnknown) }
-                  content.attachments = [try UNNotificationAttachment(identifier: "full-size", url: url)]
-                  let trigger = UNTimeIntervalNotificationTrigger(timeInterval: hideDate ? 8 : 1, repeats: false)
-                  let request = UNNotificationRequest(identifier: hideDate ? "align-b" : "align-a", content: content, trigger: trigger)
-                  center.add(request) { error in
-                      DispatchQueue.main.async {
-                          if let error { self.finish(error.localizedDescription) }
-                          else if hideDate {
-                              DispatchQueue.main.asyncAfter(deadline: .now() + 12) { NSApp.terminate(nil) }
-                          }
-                      }
-                  }
-              }
-
-              private func finish(_ message: String) {
-                  let alert = NSAlert()
-                  alert.messageText = message
-                  alert.runModal()
-                  NSApp.terminate(nil)
+                  panel.contentView = glass
+                  self.panel = panel
+                  panel.orderFrontRegardless()
+                  DispatchQueue.main.asyncAfter(deadline: .now() + 14) { NSApp.terminate(nil) }
               }
           }
 
           let app = NSApplication.shared
-          let probe = Probe()
-          app.delegate = probe
+          let preview = Preview()
+          app.delegate = preview
           app.setActivationPolicy(.accessory)
-          app.run()
+          withExtendedLifetime(preview) { app.run() }
           SWIFT
           xcrun swiftc -target arm64-apple-macos14.5 Probe.swift -o "$app/Contents/MacOS/BlueSender"
           plutil -lint "$app/Contents/Info.plist"
           codesign --force --sign - "$app"
           codesign --verify --strict "$app"
-          ditto -c -k --keepParent "$app" AirSync-Alignment-Test.zip
+          ditto -c -k --keepParent "$app" AirSync-Banner-Preview.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: AirSync-Alignment-Test
-          path: AirSync-Alignment-Test.zip
+          name: AirSync-Banner-Preview
+          path: AirSync-Banner-Preview.zip
           if-no-files-found: error

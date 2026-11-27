@@ -152,6 +152,14 @@ jobs:
           path.write_text(source.replace(original.rstrip("\n"), aligned.rstrip("\n"), 1), encoding="utf-8")
           PY
 
+      - name: Restore the original blue app icon in the asset catalog
+        working-directory: source
+        run: |
+          git fetch --depth 1 origin 53184450334af3f00032403dd2cae8c28d982fb2
+          git restore --source FETCH_HEAD -- AppIcon.icon
+          git diff --quiet -- AppIcon.icon && exit 1
+          test -f AppIcon.icon/icon.json
+
       - name: Confirm Self Compiled scheme
         working-directory: source
         run: xcodebuild -list -project AirSync.xcodeproj
@@ -183,22 +191,6 @@ jobs:
               -maxdepth 3 -name 'AirSync.app' -print
             exit 1
           fi
-
-          cp assets/BlueAirSync.icns "$APP/Contents/Resources/BlueAirSync.icns"
-          python3 - "$APP/Contents/Info.plist" <<'PY'
-          import plistlib
-          import sys
-          from pathlib import Path
-
-          path = Path(sys.argv[1])
-          info = plistlib.loads(path.read_bytes())
-          info["CFBundleIconFile"] = "BlueAirSync"
-          info.pop("CFBundleIconName", None)
-          primary = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
-          primary["CFBundleIconFiles"] = ["BlueAirSync"]
-          primary.pop("CFBundleIconName", None)
-          path.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY, sort_keys=False))
-          PY
 
           # Xcode strips development files when embedding frameworks, invalidating their resource seals.
           for framework in "$APP"/Contents/Frameworks/*.framework; do

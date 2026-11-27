@@ -91,7 +91,7 @@ jobs:
           print("AirSync menu-bar notification cards hidden; native notification delivery unchanged.")
           PY
 
-      - name: Rounded-square notification icon (22 pt, raised)
+      - name: Full-size rounded-square notification icon (32 pt)
         working-directory: source
         shell: bash
         run: |
@@ -110,9 +110,9 @@ jobs:
 
           new = r'''    private func saveIconToTemporaryFile(icon: NSImage) -> URL? {
                   // TUNING: change these three values to adjust the look.
-                  let iconSide: CGFloat = 22      // 22 pt of the 32 pt thumbnail
+                  let iconSide: CGFloat = 32      // fill the native thumbnail
                   let canvasSide: CGFloat = 32    // transparent canvas the system places
-                  let yOffset: CGFloat = 5        // raise without clipping the 22 pt artwork
+                  let yOffset: CGFloat = 0        // center the artwork within the thumbnail
                   let scale: CGFloat = 3
 
                   let px = Int(canvasSide * scale)
@@ -249,7 +249,7 @@ jobs:
           fi
 
           cp assets/BlueAirSync.icns "$APP/Contents/Resources/AppIcon.icns"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 36' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 37' "$APP/Contents/Info.plist"
 
           # Xcode strips development files when embedding frameworks, invalidating their resource seals.
           for framework in "$APP"/Contents/Frameworks/*.framework; do

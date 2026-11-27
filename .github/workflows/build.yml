@@ -1,4 +1,97 @@
-- name: Rounded square notification icon (32 pt, centered)
+
+name: Build AirSync+ (Private)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, fix/notification-icon-layout]
+    paths:
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out AirSync build assets
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check compiler
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Clone official AirSync source
+        run: |
+          git init source
+          git -C source remote add origin https://github.com/sameerasw/airsync-mac.git
+          git -C source fetch --depth 1 origin 767bdeb2f6c043de04af0924ccec2ecd889d572f
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "767bdeb2f6c043de04af0924ccec2ecd889d572f"
+
+      - name: Prepare self-compiled configuration
+        run: |
+          mkdir -p source/airsync-mac/Configs
+          touch source/airsync-mac/Configs/Shared.xcconfig
+
+          cat > source/airsync-mac/Configs/SelfCompiled.xcconfig <<'EOF'
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) SELF_COMPILED
+          EOF
+
+      - name: Fix manual clipboard sending from menu bar
+        working-directory: source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("airsync-mac/Screens/MenubarView/MenubarSegments.swift")
+          source = path.read_text(encoding="utf-8")
+          start = source.index("    private func sendClipboard() {")
+          end = source.index("    private func openQuickShare()", start)
+          handler = source[start:end]
+
+          old = "        }\n    }\n"
+          new = (
+              "        } else if let text = pasteboard.string(forType: .string), !text.isEmpty {\n"
+              "            appState.sendClipboardToAndroid(text: text)\n"
+              "        }\n    }\n"
+          )
+          if handler.count(old) != 1 or "appState.sendClipboardToAndroid(text: text)" in handler:
+              raise SystemExit("Upstream menu-bar clipboard handler changed; refusing unsafe patch")
+
+          patched = source[:start] + handler.replace(old, new, 1) + source[end:]
+          path.write_text(patched, encoding="utf-8")
+          print("Manual menu-bar text clipboard send enabled. Empty clipboard is a no-op.")
+          PY
+
+      - name: Hide duplicate notifications from AirSync menu bar
+        working-directory: source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("airsync-mac/Screens/MenubarView/MenubarView.swift")
+          source = path.read_text(encoding="utf-8")
+          old = (
+              "            NotificationsSegmentView()\n"
+              "                .staggeredEntrance(index: 4, isVisible: appState.isMenubarWindowOpen)\n"
+          )
+          if source.count(old) != 1:
+              raise SystemExit("Upstream menu-bar layout changed; refusing unsafe patch")
+
+          path.write_text(source.replace(old, "", 1), encoding="utf-8")
+          print("AirSync menu-bar notification cards hidden; native notification delivery unchanged.")
+          PY
+
+      - name: Rounded square notification icon (32 pt, centered)
         working-directory: source
         shell: bash
         run: |
@@ -18,8 +111,8 @@
           new = r'''    private func saveIconToTemporaryFile(icon: NSImage) -> URL? {
                   // TUNING: change these three values to adjust the look.
                   let iconSide: CGFloat = 32      // visible icon size in pt
-                  let canvasSide: CGFloat = 44    // transparent canvas the system places
-                  let yOffset: CGFloat = 0        // pt, positive moves the icon UP (try 2, 4, 6)
+                  let canvasSide: CGFloat = 32    // transparent canvas the system places
+                  let yOffset: CGFloat = 0        // full-size artwork uses the entire thumbnail
                   let scale: CGFloat = 3
 
                   let px = Int(canvasSide * scale)
@@ -69,5 +162,121 @@
               }
           '''
           path.write_text(source[:start] + new + source[end:], encoding="utf-8")
-          print("Notification icon: rounded square, centered canvas.")
+          marker = "        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)"
+          site = "    private func finalizeAndSchedule("
+          patched = path.read_text(encoding="utf-8")
+          a = patched.index(site)
+          b = patched.index(marker, a)
+          icon_override = """\
+                  // Prefer the bundled blue artwork for the native sender icon.
+                  if let url = Bundle.main.url(forResource: "BlueAirSync", withExtension: "icns"),
+                     let iconClass = NSClassFromString("UNNotificationIcon"),
+                     let iconType = iconClass as? NSObject.Type {
+                      let makeIcon = NSSelectorFromString("iconAtPath:")
+                      let setIcon = NSSelectorFromString("setIcon:")
+                      if iconType.responds(to: makeIcon), content.responds(to: setIcon),
+                         let senderIcon = iconType.perform(makeIcon, with: url.path)?.takeUnretainedValue() {
+                          _ = content.perform(setIcon, with: senderIcon)
+                      }
+                  }
+          """
+          path.write_text(patched[:b] + icon_override + patched[b:], encoding="utf-8")
+          print("Notification artwork uses the full thumbnail and requests the blue sender icon.")
           PY
+
+      - name: Restore the original blue app icon in the asset catalog
+        working-directory: source
+        run: |
+          git fetch --depth 1 origin 53184450334af3f00032403dd2cae8c28d982fb2
+          git restore --source FETCH_HEAD -- AppIcon.icon
+          git diff --quiet -- AppIcon.icon && exit 1
+          test -f AppIcon.icon/icon.json
+
+      - name: Confirm Self Compiled scheme
+        working-directory: source
+        run: xcodebuild -list -project AirSync.xcodeproj
+
+      - name: Build AirSync+ for Apple Silicon
+        working-directory: source
+        shell: bash
+        run: |
+          set -o pipefail
+
+          xcodebuild \
+            -project AirSync.xcodeproj \
+            -scheme "AirSync Self Compiled" \
+            -configuration "Self Compiled" \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/AirSyncBuild" \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee "$RUNNER_TEMP/AirSync-build.log"
+
+      - name: Package compiled application
+        shell: bash
+        run: |
+          APP="$RUNNER_TEMP/AirSyncBuild/Build/Products/Self Compiled/AirSync.app"
+
+          if [ ! -d "$APP" ]; then
+            echo "AirSync.app not found at expected build path"
+            find "$RUNNER_TEMP/AirSyncBuild/Build/Products" \
+              -maxdepth 3 -name 'AirSync.app' -print
+            exit 1
+          fi
+
+          cp assets/BlueAirSync.icns "$APP/Contents/Resources/BlueAirSync.icns"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 34' "$APP/Contents/Info.plist"
+
+          # Xcode strips development files when embedding frameworks, invalidating their resource seals.
+          for framework in "$APP"/Contents/Frameworks/*.framework; do
+            codesign --force --sign - "$framework"
+          done
+
+          for extension in "$APP"/Contents/PlugIns/*.appex; do
+            case "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension/Contents/Info.plist")" in
+              sameerasw.airsync-mac.share) entitlements=AirSyncShareExtension.entitlements ;;
+              sameerasw.airsync-mac.widget) entitlements=AirSyncWidgetExtension.entitlements ;;
+              *) echo "Unexpected app extension: $extension"; exit 1 ;;
+            esac
+            codesign --force --sign - --entitlements "source/$entitlements" "$extension"
+          done
+          codesign --force --sign - --entitlements source/AirSync.entitlements "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          lipo -verify_arch arm64 "$APP/Contents/MacOS/AirSync"
+
+          STAGING="$RUNNER_TEMP/AirSync-DMG"
+          mkdir -p "$STAGING"
+          ditto "$APP" "$STAGING/AirSync.app"
+          ln -s /Applications "$STAGING/Applications"
+          DMG="$GITHUB_WORKSPACE/AirSync-Plus-4.2.0-arm64.dmg"
+          hdiutil create -volname 'AirSync+' -srcfolder "$STAGING" -format UDZO "$DMG"
+          hdiutil verify "$DMG"
+
+          ditto -c -k --keepParent \
+            "$APP" \
+            "$GITHUB_WORKSPACE/AirSync-Plus.zip"
+
+      - name: Upload application
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSync-Plus
+          path: AirSync-Plus.zip
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSync-Plus-4.2.0-arm64
+          path: AirSync-Plus-4.2.0-arm64.dmg
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSync-build-log
+          path: ${{ runner.temp }}/AirSync-build.log
+          retention-days: 3
+          if-no-files-found: ignore
